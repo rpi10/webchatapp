@@ -1,15 +1,16 @@
 {
-  "name": "chat-app",
+  "name": "webchatapp",
   "version": "1.0.0",
+  "description": "A simple chat application",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
   },
   "dependencies": {
     "express": "^4.17.1",
-    "http": "^0.0.1-security",
-    "socket.io": "^4.4.0",
-    "better-sqlite3": "^8.0.0",  // Add this line
-    "sqlite3": "^5.0.8"
+    "http": "^0.0.1",
+    "socket.io": "^4.0.0",
+    "better-sqlite3": "^8.0.0",
+    "path": "^0.12.7"
   }
 }
