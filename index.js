@@ -1,7 +1,8 @@
 const express = require('express');
 const http = require('http');
 const socketIo = require('socket.io');
-const sqlite3 = require('sqlite3').verbose();
+const sqlite = require('sqlite');
+const sqlite3 = require('sqlite3');
 const path = require('path');
 
 const app = express();
@@ -12,11 +13,12 @@ const io = socketIo(server);
 app.use(express.static(path.join(__dirname, 'public')));
 
 // Initialize SQLite database
-const db = new sqlite3.Database(':memory:');  // Use ':memory:' for an in-memory database, or specify a file path for persistent storage
+let db;
 
-db.serialize(() => {
-    db.run("CREATE TABLE IF NOT EXISTS messages (id INTEGER PRIMARY KEY AUTOINCREMENT, sender TEXT, receiver TEXT, message TEXT, timestamp DATETIME DEFAULT CURRENT_TIMESTAMP)");
-});
+(async () => {
+    db = await sqlite.open({ filename: ':memory:', driver: sqlite3.Database });
+    await db.run("CREATE TABLE IF NOT EXISTS messages (id INTEGER PRIMARY KEY AUTOINCREMENT, sender TEXT, receiver TEXT, message TEXT, timestamp DATETIME DEFAULT CURRENT_TIMESTAMP)");
+})();
 
 const users = {};  // {username: {socketId: socketId, online: boolean}}
 
@@ -45,10 +47,9 @@ io.on('connection', (socket) => {
         // Save the message to the database
         saveMessage(socket.username, to, msg);
 
-        // Notify the recipient if they are online
+        // Send the message to the recipient if they are online
         if (users[to] && users[to].online) {
             io.to(users[to].socketId).emit('chat message', message);
-            io.to(users[to].socketId).emit('new message notification', { from: socket.username, msg });
         }
 
         // Also send the message back to the sender
@@ -74,12 +75,12 @@ io.on('connection', (socket) => {
 });
 
 // Function to save a message to the SQLite database
-function saveMessage(sender, receiver, message) {
-    db.run("INSERT INTO messages (sender, receiver, message) VALUES (?, ?, ?)", [sender, receiver, message]);
+async function saveMessage(sender, receiver, message) {
+    await db.run("INSERT INTO messages (sender, receiver, message) VALUES (?, ?, ?)", [sender, receiver, message]);
 }
 
 // Function to load private message history between two users
-function loadPrivateMessageHistory(user1, user2, callback) {
+async function loadPrivateMessageHistory(user1, user2, callback) {
     let query, params;
 
     if (user2) {
@@ -92,11 +93,8 @@ function loadPrivateMessageHistory(user1, user2, callback) {
         params = [user1, user1];
     }
 
-    db.all(query, params, (err, rows) => {
-        if (err) {
-            console.error(err);
-            return;
-        }
+    try {
+        const rows = await db.all(query, params);
         const messages = rows.map(row => ({
             from: row.sender,
             to: row.receiver,
@@ -104,7 +102,9 @@ function loadPrivateMessageHistory(user1, user2, callback) {
             timestamp: row.timestamp
         }));
         callback(messages);
-    });
+    } catch (err) {
+        console.error(err);
+    }
 }
 
 const PORT = process.env.PORT || 3000;
