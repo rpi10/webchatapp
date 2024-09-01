@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Web Chat App</title>
+    <style>
+        body { display: flex; height: 100vh; margin: 0; }
+        
+        #sidebar { width: 200px; padding: 10px; background: #f4f4f4; border-right: 1px solid #ccc; overflow-y: auto; }
+        #chat-area { flex: 1; padding: 10px; display: flex; flex-direction: column; }
+        ul { list-style-type: none; padding: 0; margin: 0; }
+        li { padding: 8px; margin-bottom: 10px; border-radius: 5px; cursor: pointer; }
+        li.selected { background: #ddd; }
+        #form { display: flex; align-items: center; }
+        input { padding: 10px; border-radius: 5px; border: 1px solid #ccc; flex: 1; }
+        button {
+            padding: 0;
+            border-radius: 5px;
+            border: none;
+            margin-left: 10px;
+            cursor: pointer;
+            background: url('https://media.istockphoto.com/id/1290684294/vector/send-message-icon.jpg?s=612x612&w=0&k=20&c=8vwd4PDMzEELKMUrTQ7LZnpngAN5Bzs55sRJ09sA8FU=') no-repeat center center;
+            background-size: cover;
+            width: 40px;
+            height: 40px;
+        }
+        #messages { flex: 1; overflow-y: auto; }
+        #username-prompt { display: none; margin-bottom: 20px; }
+        .message-from-me { background-color: #E2FFC7; color: black; text-align: left; }
+        .message-from-others { background-color: #f1ecec; color: black; }
+        #chat-header { margin-bottom: 20px; font-weight: bold; }
+        .online-status {
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            margin-right: 5px;
+        }
+        .online { background-color: green; }
+        .offline { background-color: red; }
+        @media (max-width: 768px) {
+            #sidebar { width: 100%; max-width: none; height: auto; position: static; border-right: none; border-bottom: 1px solid #ccc; }
+            #chat-area { width: 100%; margin-left: 0; }
+            button { width: 35px; height: 35px; }
+        }
+    </style>
+</head>
+<body>
+    <div id="username-prompt">
+        <label for="username">Enter your username:</label>
+        <input id="username" autocomplete="off" placeholder="Username">
+        <button id="save-username">Save Username</button>
+    </div>
+    <div id="sidebar">
+        <h2>Users</h2>
+        <ul id="users-list"></ul>
+    </div>
+    <div id="chat-area">
+        <h2 id="chat-header">Chat</h2>
+        <ul id="messages"></ul>
+        <form id="form" action="">
+            <input id="input" autocomplete="off" placeholder="Type a message..."/>
+            <button type="submit"></button>
+        </form>
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+        const socket = io();
+        const form = document.getElementById('form');
+        const input = document.getElementById('input');
+        const messages = document.getElementById('messages');
+        const usersList = document.getElementById('users-list');
+        const usernamePrompt = document.getElementById('username-prompt');
+        const usernameInput = document.getElementById('username');
+        const saveUsernameButton = document.getElementById('save-username');
+        let currentUser = null;
+        let currentConversation = null;
+
+        function setUsername(username) {
+            localStorage.setItem('username', username);
+            socket.emit('set username', username);
+            usernamePrompt.style.display = 'none';
+        }
+
+        function getUsername() {
+            return localStorage.getItem('username');
+        }
+
+        function updateConversation(conversation) {
+            currentConversation = conversation;
+            document.getElementById('chat-header').textContent = `Chat with ${conversation}`;
+            document.querySelectorAll('#users-list li').forEach(li => li.classList.remove('selected'));
+            const item = Array.from(usersList.children).find(li => li.textContent.trim() === conversation);
+            if (item) {
+                item.classList.add('selected');
+            }
+            messages.innerHTML = '';  // Clear messages before loading new ones
+            socket.emit('load messages', { user: currentConversation });
+        }
+
+        function displayMessage({ from, to, msg }) {
+            if (to === currentConversation || from === currentConversation) {
+                const item = document.createElement('li');
+                item.style.backgroundColor = from === currentUser ? '#E2FFC7' : '#f1ecec';
+                item.style.color = 'black';
+                item.textContent = `${from}: ${msg}`;
+                messages.appendChild(item);
+                messages.scrollTop = messages.scrollHeight;  // Scroll to the bottom
+            }
+        }
+
+        saveUsernameButton.addEventListener('click', () => {
+            const username = usernameInput.value.trim();
+            if (username) {
+                setUsername(username);
+                currentUser = username;
+            }
+        });
+
+        socket.on('connect', () => {
+            const storedUsername = getUsername();
+            if (storedUsername) {
+                setUsername(storedUsername);
+                currentUser = storedUsername;
+            } else {
+                usernamePrompt.style.display = 'block';
+            }
+        });
+
+        socket.on('chat message', (data) => {
+            displayMessage(data);
+        });
+
+        socket.on('chat history', (messages) => {
+            messages.forEach(displayMessage);
+        });
+
+        socket.on('users list', (users) => {
+            const currentUser = getUsername();
+            usersList.innerHTML = '';
+            users.forEach(user => {
+                if (user.username !== currentUser) {  // Check to exclude the current user
+                    const item = document.createElement('li');
+                    const status = document.createElement('span');
+                    status.className = `online-status ${user.online ? 'online' : 'offline'}`;
+                    item.appendChild(status);
+                    item.appendChild(document.createTextNode(user.username));
+                    item.addEventListener('click', () => updateConversation(user.username));
+                    usersList.appendChild(item);
+                }
+            });
+        });
+
+        form.addEventListener('submit', (e) => {
+            e.preventDefault();
+            if (input.value && currentConversation) {
+                socket.emit('chat message', { to: currentConversation, msg: input.value });
+                input.value = '';
+            }
+        });
+
+        currentConversation = null;
+        const storedUsername = getUsername();
+        if (storedUsername) {
+            socket.emit('set username', storedUsername);
+            currentUser = storedUsername;
+        }
+    </script>
+</body>
+</html>
