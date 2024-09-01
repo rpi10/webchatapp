@@ -10,11 +10,11 @@
         #sidebar { width: 200px; padding: 10px; background: #f4f4f4; border-right: 1px solid #ccc; overflow-y: auto; }
         #chat-area { flex: 1; padding: 10px; display: flex; flex-direction: column; }
         ul { list-style-type: none; padding: 0; margin: 0; }
-        li { padding: 8px; margin-bottom: 10px; border-radius: 5px; cursor: pointer; }
+        li { padding: 8px; margin-bottom: 10px; border-radius: 5px; cursor: pointer; position: relative; }
         li.selected { background: #ddd; }
         #form { display: flex; align-items: center; }
         input { padding: 10px; border-radius: 5px; border: 1px solid #ccc; flex: 1; }
-        button {
+        #send {
             padding: 0;
             border-radius: 5px;
             border: none;
@@ -26,7 +26,6 @@
             height: 40px;
         }
         #messages { flex: 1; overflow-y: auto; }
-        #username-prompt { display: none; margin-bottom: 20px; }
         .message-from-me { background-color: #E2FFC7; color: black; text-align: left; }
         .message-from-others { background-color: #f1ecec; color: black; }
         #chat-header { margin-bottom: 20px; font-weight: bold; }
@@ -39,19 +38,74 @@
         }
         .online { background-color: green; }
         .offline { background-color: red; }
+        #login-screen {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.5);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+        }
+        #login-box {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            text-align: center;
+            box-shadow: 0px 4px 6px rgba(0, 0, 0, 0.1);
+        }
+        #login-box input {
+            padding: 10px;
+            margin-bottom: 10px;
+            border-radius: 5px;
+            border: 1px solid #ccc;
+            width: 100%;
+            box-sizing: border-box;
+        }
+        #login-box button {
+            padding: 10px 20px;
+            border-radius: 5px;
+            border: none;
+            background-color: #007bff;
+            color: white;
+            cursor: pointer;
+            width: 100%;
+        }
+        #login-box button:hover {
+            background-color: #0056b3;
+        }
+        .unseen-count {
+            background-color: red;
+            color: white;
+            border-radius: 50%;
+            padding: 2px 6px;
+            font-size: 12px;
+            margin-left: 5px;
+            position: absolute;
+            top: 5px;
+            right: 10px;
+        }
         @media (max-width: 768px) {
             #sidebar { width: 100%; max-width: none; height: auto; position: static; border-right: none; border-bottom: 1px solid #ccc; }
             #chat-area { width: 100%; margin-left: 0; }
             button { width: 35px; height: 35px; }
-        }
-    </style>
+        }    
+        </style>
 </head>
 <body>
-    <div id="username-prompt">
-        <label for="username">Enter your username:</label>
-        <input id="username" autocomplete="off" placeholder="Username">
-        <button id="save-username">Save Username</button>
+    <!-- Login Screen -->
+    <div id="login-screen">
+        <div id="login-box">
+            <h2>Login</h2>
+            <input id="username-input" type="text" placeholder="Enter your username" />
+            <button id="login-button">Login</button>
+        </div>
     </div>
+
+    <!-- Chat Interface -->
     <div id="sidebar">
         <h2>Users</h2>
         <ul id="users-list"></ul>
@@ -61,9 +115,12 @@
         <ul id="messages"></ul>
         <form id="form" action="">
             <input id="input" autocomplete="off" placeholder="Type a message..."/>
-            <button type="submit"></button>
+            <button type="submit" id="send"></button>
         </form>
     </div>
+
+    <!-- Notification sound -->
+    <audio id="beep-sound" src="ring-tone.mp3" preload="auto"></audio>
 
     <script src="/socket.io/socket.io.js"></script>
     <script>
@@ -72,16 +129,16 @@
         const input = document.getElementById('input');
         const messages = document.getElementById('messages');
         const usersList = document.getElementById('users-list');
-        const usernamePrompt = document.getElementById('username-prompt');
-        const usernameInput = document.getElementById('username');
-        const saveUsernameButton = document.getElementById('save-username');
+        const loginScreen = document.getElementById('login-screen');
+        const loginButton = document.getElementById('login-button');
+        const usernameInput = document.getElementById('username-input');
         let currentUser = null;
         let currentConversation = null;
+        let unseenMessages = {}; // Track unseen messages count
 
         function setUsername(username) {
             localStorage.setItem('username', username);
             socket.emit('set username', username);
-            usernamePrompt.style.display = 'none';
         }
 
         function getUsername() {
@@ -96,7 +153,7 @@
             if (item) {
                 item.classList.add('selected');
             }
-            messages.innerHTML = '';  // Clear messages before loading new ones
+            messages.innerHTML = ''; // Clear messages before loading new ones
             socket.emit('load messages', { user: currentConversation });
         }
 
@@ -111,11 +168,38 @@
             }
         }
 
-        saveUsernameButton.addEventListener('click', () => {
+        function playBeep() {
+            const beepSound = document.getElementById('beep-sound');
+            beepSound.play();
+        }
+
+        function showNotification(from, msg) {
+            if (Notification.permission === 'granted') {
+                new Notification(`New message from ${from}`, {
+                    body: msg,
+                    icon: '/path/to/icon.png' // Optional: Add an icon
+                });
+            }
+        }
+
+        function getUnseenMessages(username) {
+            return unseenMessages[username] || 0;
+        }
+
+        function resetUnseenCount(username) {
+            unseenMessages[username] = 0;
+            const userItem = Array.from(usersList.children).find(li => li.textContent.trim().startsWith(username));
+            if (userItem) {
+                userItem.querySelectorAll('.unseen-count').forEach(count => count.remove());
+            }
+        }
+
+        loginButton.addEventListener('click', () => {
             const username = usernameInput.value.trim();
             if (username) {
                 setUsername(username);
                 currentUser = username;
+                loginScreen.style.display = 'none'; // Hide login screen after login
             }
         });
 
@@ -124,13 +208,27 @@
             if (storedUsername) {
                 setUsername(storedUsername);
                 currentUser = storedUsername;
-            } else {
-                usernamePrompt.style.display = 'block';
+                loginScreen.style.display = 'none'; // Hide login screen if already logged in
             }
         });
 
         socket.on('chat message', (data) => {
             displayMessage(data);
+            if (data.from !== currentUser) {
+                playBeep();
+                showNotification(data.from, data.msg);
+                unseenMessages[data.from] = (unseenMessages[data.from] || 0) + 1;
+                const userItem = Array.from(usersList.children).find(li => li.textContent.trim().startsWith(data.from));
+                if (userItem) {
+                    let count = userItem.querySelector('.unseen-count');
+                    if (!count) {
+                        count = document.createElement('span');
+                        count.className = 'unseen-count';
+                        userItem.appendChild(count);
+                    }
+                    count.textContent = unseenMessages[data.from];
+                }
+            }
         });
 
         socket.on('chat history', (messages) => {
@@ -147,7 +245,17 @@
                     status.className = `online-status ${user.online ? 'online' : 'offline'}`;
                     item.appendChild(status);
                     item.appendChild(document.createTextNode(user.username));
-                    item.addEventListener('click', () => updateConversation(user.username));
+                    const unseenCount = getUnseenMessages(user.username);
+                    if (unseenCount > 0) {
+                        const count = document.createElement('span');
+                        count.className = 'unseen-count';
+                        count.textContent = unseenCount;
+                        item.appendChild(count);
+                    }
+                    item.addEventListener('click', () => {
+                        updateConversation(user.username);
+                        resetUnseenCount(user.username);
+                    });
                     usersList.appendChild(item);
                 }
             });
@@ -161,11 +269,12 @@
             }
         });
 
-        currentConversation = null;
+        // On page load, check if the user is already logged in
         const storedUsername = getUsername();
         if (storedUsername) {
             socket.emit('set username', storedUsername);
             currentUser = storedUsername;
+            loginScreen.style.display = 'none'; // Hide login screen if already logged in
         }
     </script>
 </body>

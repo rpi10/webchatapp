@@ -34,7 +34,7 @@ io.on('connection', (socket) => {
         })));
         
         // Load the user's message history on login
-        loadMessageHistory(username, (messages) => {
+        loadPrivateMessageHistory(username, null, (messages) => {
             socket.emit('chat history', messages);
         });
     });
@@ -45,9 +45,10 @@ io.on('connection', (socket) => {
         // Save the message to the database
         saveMessage(socket.username, to, msg);
 
-        // Send the message to the recipient if they are online
+        // Notify the recipient if they are online
         if (users[to] && users[to].online) {
             io.to(users[to].socketId).emit('chat message', message);
+            io.to(users[to].socketId).emit('new message notification', { from: socket.username, msg });
         }
 
         // Also send the message back to the sender
@@ -55,7 +56,7 @@ io.on('connection', (socket) => {
     });
 
     socket.on('load messages', ({ user }) => {
-        loadMessageHistory(user, (messages) => {
+        loadPrivateMessageHistory(socket.username, user, (messages) => {
             socket.emit('chat history', messages);
         });
     });
@@ -77,9 +78,21 @@ function saveMessage(sender, receiver, message) {
     db.run("INSERT INTO messages (sender, receiver, message) VALUES (?, ?, ?)", [sender, receiver, message]);
 }
 
-// Function to load message history between two users
-function loadMessageHistory(user, callback) {
-    db.all("SELECT sender, receiver, message, timestamp FROM messages WHERE sender = ? OR receiver = ? ORDER BY timestamp ASC", [user, user], (err, rows) => {
+// Function to load private message history between two users
+function loadPrivateMessageHistory(user1, user2, callback) {
+    let query, params;
+
+    if (user2) {
+        // Load messages between two users
+        query = "SELECT sender, receiver, message, timestamp FROM messages WHERE (sender = ? AND receiver = ?) OR (sender = ? AND receiver = ?) ORDER BY timestamp ASC";
+        params = [user1, user2, user2, user1];
+    } else {
+        // Load all messages involving the user
+        query = "SELECT sender, receiver, message, timestamp FROM messages WHERE sender = ? OR receiver = ? ORDER BY timestamp ASC";
+        params = [user1, user1];
+    }
+
+    db.all(query, params, (err, rows) => {
         if (err) {
             console.error(err);
             return;
