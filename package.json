@@ -1,15 +1,20 @@
 {
-  "name": "webchatapp",
+  "name": "openchat",
   "version": "1.0.0",
-  "description": "A simple chat application",
   "main": "index.js",
   "scripts": {
-    "start": "node index.js",
-    "build": "echo 'No build step needed'"
+    "start": "node index.js"
   },
   "dependencies": {
     "express": "^4.17.1",
+    "http": "^0.0.1-security",
     "socket.io": "^4.0.0",
-    "mongodb": "^5.0.0"
-  }
+    "sqlite3": "^5.0.0",
+    "path": "^0.12.7"
+  },
+  "engines": {
+    "node": ">=14.0.0"
+  },
+  "author": "Jeremie",
+  "license": "ISC"
 }
