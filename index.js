@@ -12,7 +12,7 @@ const io = socketIo(server);
 app.use(express.static(path.join(__dirname, 'public')));
 
 // Initialize SQLite database
-const db = new sqlite3.Database(':memory:');  // Use ':memory:' for an in-memory database, or specify a file path for persistent storage
+const db = new sqlite3.Database('chatapp.db');  // Use a file-based database for persistence
 
 db.serialize(() => {
     db.run("CREATE TABLE IF NOT EXISTS messages (id INTEGER PRIMARY KEY AUTOINCREMENT, sender TEXT, receiver TEXT, message TEXT, timestamp DATETIME DEFAULT CURRENT_TIMESTAMP)");
