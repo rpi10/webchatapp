@@ -1,7 +1,7 @@
 const express = require('express');
 const http = require('http');
 const socketIo = require('socket.io');
-const sqlite3 = require('sqlite3').verbose();
+const { Pool } = require('pg');
 const path = require('path');
 
 const app = express();
@@ -11,11 +11,27 @@ const io = socketIo(server);
 // Serve static files from the "public" directory
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Initialize SQLite database
-const db = new sqlite3.Database('chatapp.db');  // Use a file-based database for persistence
+// Initialize PostgreSQL pool
+const pool = new Pool({
+    connectionString: process.env.DATABASE_URL, // The DATABASE_URL should be set in your Render environment variables
+    ssl: {
+        rejectUnauthorized: false, // Necessary for connecting to PostgreSQL on Render
+    },
+});
 
-db.serialize(() => {
-    db.run("CREATE TABLE IF NOT EXISTS messages (id INTEGER PRIMARY KEY AUTOINCREMENT, sender TEXT, receiver TEXT, message TEXT, timestamp DATETIME DEFAULT CURRENT_TIMESTAMP)");
+// Create the messages table if it doesn't exist
+pool.query(`
+    CREATE TABLE IF NOT EXISTS messages (
+        id SERIAL PRIMARY KEY,
+        sender TEXT,
+        receiver TEXT,
+        message TEXT,
+        timestamp TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+    );
+`, (err) => {
+    if (err) {
+        console.error('Error creating table:', err);
+    }
 });
 
 const users = {};  // {username: {socketId: socketId, online: boolean}}
@@ -73,35 +89,54 @@ io.on('connection', (socket) => {
     });
 });
 
-// Function to save a message to the SQLite database
+// Function to save a message to the PostgreSQL database
 function saveMessage(sender, receiver, message) {
-    db.run("INSERT INTO messages (sender, receiver, message) VALUES (?, ?, ?)", [sender, receiver, message]);
+    pool.query(
+        'INSERT INTO messages (sender, receiver, message) VALUES ($1, $2, $3)',
+        [sender, receiver, message],
+        (err) => {
+            if (err) {
+                console.error('Error saving message:', err);
+            }
+        }
+    );
 }
 
 // Function to load private message history between two users
 function loadPrivateMessageHistory(user1, user2, callback) {
-    let query, params;
+    let query;
+    let params;
 
     if (user2) {
         // Load messages between two users
-        query = "SELECT sender, receiver, message, timestamp FROM messages WHERE (sender = ? AND receiver = ?) OR (sender = ? AND receiver = ?) ORDER BY timestamp ASC";
-        params = [user1, user2, user2, user1];
+        query = `
+            SELECT sender, receiver, message, timestamp
+            FROM messages
+            WHERE (sender = $1 AND receiver = $2) OR (sender = $2 AND receiver = $1)
+            ORDER BY timestamp ASC
+        `;
+        params = [user1, user2];
     } else {
         // Load all messages involving the user
-        query = "SELECT sender, receiver, message, timestamp FROM messages WHERE sender = ? OR receiver = ? ORDER BY timestamp ASC";
-        params = [user1, user1];
+        query = `
+            SELECT sender, receiver, message, timestamp
+            FROM messages
+            WHERE sender = $1 OR receiver = $1
+            ORDER BY timestamp ASC
+        `;
+        params = [user1];
     }
 
-    db.all(query, params, (err, rows) => {
+    pool.query(query, params, (err, result) => {
         if (err) {
-            console.error(err);
+            console.error('Error loading message history:', err);
             return;
         }
-        const messages = rows.map(row => ({
+        const messages = result.rows.map(row => ({
             from: row.sender,
             to: row.receiver,
             msg: row.message,
-            timestamp: row.timestamp
+            timestamp: row.timestamp,
         }));
         callback(messages);
     });
