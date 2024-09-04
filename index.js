@@ -3,6 +3,8 @@ const http = require('http');
 const socketIo = require('socket.io');
 const { Pool } = require('pg');
 const path = require('path');
+const bcrypt = require('bcrypt');
+const session = require('express-session');
 require('dotenv').config();
 
 const app = express();
@@ -11,6 +13,15 @@ const io = socketIo(server);
 
 // Serve static files from the "public" directory
 app.use(express.static(path.join(__dirname, 'public')));
+
+// Middleware
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+app.use(session({
+    secret: 'your-session-secret', // Replace with a strong secret
+    resave: false,
+    saveUninitialized: true,
+}));
 
 // Initialize PostgreSQL pool
 const pool = new Pool({
@@ -25,9 +36,11 @@ pool.query(`
     CREATE TABLE IF NOT EXISTS users (
         id SERIAL PRIMARY KEY,
         username TEXT UNIQUE NOT NULL,
-        online BOOLEAN DEFAULT FALSE
+        password TEXT NOT NULL,
+        online BOOLEAN DEFAULT FALSE,
+        socket_id TEXT UNIQUE
     );
-    
+
     CREATE TABLE IF NOT EXISTS messages (
         id SERIAL PRIMARY KEY,
         sender TEXT,
@@ -45,40 +58,58 @@ pool.query(`
 
 const users = {};  // {username: {socketId: socketId, online: boolean}}
 
+// Handle WebSocket connections
 io.on('connection', (socket) => {
     console.log('A user connected');
 
-    socket.on('set username', (username) => {
-        socket.username = username;
-
-        // Save the user to the database and mark as online
-        pool.query(
-            `INSERT INTO users (username, online) 
-             VALUES ($1, TRUE)
-             ON CONFLICT (username) DO UPDATE SET online = TRUE`,
-            [username],
-            (err) => {
-                if (err) {
-                    console.error('Error saving user:', err);
-                    return;
-                }
-
-                // Send the users list to all clients
-                updateUsersList();
+    socket.on('set username', async ({ username, password }) => {
+        try {
+            const result = await pool.query('SELECT * FROM users WHERE username = $1', [username]);
+            if (result.rows.length === 0) {
+                socket.emit('login error', 'User does not exist');
+                return;
             }
-        );
+            
+            const user = result.rows[0];
+            const match = await bcrypt.compare(password, user.password);
+            if (!match) {
+                socket.emit('login error', 'Incorrect password');
+                return;
+            }
 
-        // Load the user's message history on login
-        loadPrivateMessageHistory(username, null, (messages) => {
-            socket.emit('chat history', messages);
-        });
+            // Check if user is already connected from another device
+            if (user.socket_id && user.socket_id !== socket.id) {
+                socket.emit('login error', 'User already logged in from another device');
+                return;
+            }
+
+            // Save the user to the database and mark as online
+            await pool.query(
+                `UPDATE users SET online = TRUE, socket_id = $1 WHERE username = $2`,
+                [socket.id, username]
+            );
+
+            users[username] = { socketId: socket.id, online: true };
+            socket.username = username;
+
+            // Send the users list to all clients
+            updateUsersList();
+
+            // Load the user's message history on login
+            loadPrivateMessageHistory(username, null, (messages) => {
+                socket.emit('chat history', messages);
+            });
+        } catch (err) {
+            console.error('Error during login:', err);
+            socket.emit('login error', 'An error occurred');
+        }
     });
 
-    socket.on('chat message', ({ to, msg }) => {
+    socket.on('chat message', async ({ to, msg }) => {
         const message = { from: socket.username, msg, to };
 
         // Save the message to the database
-        saveMessage(socket.username, to, msg);
+        await saveMessage(socket.username, to, msg);
 
         // Notify the recipient if they are online
         if (users[to] && users[to].online) {
@@ -96,36 +127,31 @@ io.on('connection', (socket) => {
         });
     });
 
-    socket.on('disconnect', () => {
+    socket.on('disconnect', async () => {
         console.log('A user disconnected');
         if (socket.username) {
-            // Mark the user as offline
-            pool.query(
-                `UPDATE users SET online = FALSE WHERE username = $1`,
-                [socket.username],
-                (err) => {
-                    if (err) {
-                        console.error('Error marking user offline:', err);
-                    } else {
-                        updateUsersList();
-                    }
-                }
+            // Mark the user as offline and remove the socket_id
+            await pool.query(
+                `UPDATE users SET online = FALSE, socket_id = NULL WHERE username = $1`,
+                [socket.username]
             );
+
+            delete users[socket.username];
+            updateUsersList();
         }
     });
 });
 
 // Function to save a message to the PostgreSQL database
-function saveMessage(sender, receiver, message) {
-    pool.query(
-        'INSERT INTO messages (sender, receiver, message) VALUES ($1, $2, $3)',
-        [sender, receiver, message],
-        (err) => {
-            if (err) {
-                console.error('Error saving message:', err);
-            }
-        }
-    );
+async function saveMessage(sender, receiver, message) {
+    try {
+        await pool.query(
+            'INSERT INTO messages (sender, receiver, message) VALUES ($1, $2, $3)',
+            [sender, receiver, message]
+        );
+    } catch (err) {
+        console.error('Error saving message:', err);
+    }
 }
 
 // Function to load private message history between two users
