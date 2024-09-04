@@ -3,6 +3,7 @@ const http = require('http');
 const socketIo = require('socket.io');
 const { Pool } = require('pg');
 const path = require('path');
+require('dotenv').config();
 
 const app = express();
 const server = http.createServer(app);
@@ -13,14 +14,20 @@ app.use(express.static(path.join(__dirname, 'public')));
 
 // Initialize PostgreSQL pool
 const pool = new Pool({
-    connectionString: process.env.DATABASE_URL, // The DATABASE_URL should be set in your Render environment variables
+    connectionString: process.env.DATABASE_URL, // Set this in your Render environment variables
     ssl: {
-        rejectUnauthorized: false, // Necessary for connecting to PostgreSQL on Render
+        rejectUnauthorized: false,
     },
 });
 
-// Create the messages table if it doesn't exist
+// Create tables if they don't exist
 pool.query(`
+    CREATE TABLE IF NOT EXISTS users (
+        id SERIAL PRIMARY KEY,
+        username TEXT UNIQUE NOT NULL,
+        online BOOLEAN DEFAULT FALSE
+    );
+    
     CREATE TABLE IF NOT EXISTS messages (
         id SERIAL PRIMARY KEY,
         sender TEXT,
@@ -30,7 +37,9 @@ pool.query(`
     );
 `, (err) => {
     if (err) {
-        console.error('Error creating table:', err);
+        console.error('Error creating tables:', err);
+    } else {
+        console.log('Tables created or verified successfully.');
     }
 });
 
@@ -40,15 +49,25 @@ io.on('connection', (socket) => {
     console.log('A user connected');
 
     socket.on('set username', (username) => {
-        users[username] = { socketId: socket.id, online: true };
         socket.username = username;
-        
-        // Send the users list to all clients
-        io.emit('users list', Object.keys(users).map(user => ({
-            username: user,
-            online: users[user].online
-        })));
-        
+
+        // Save the user to the database and mark as online
+        pool.query(
+            `INSERT INTO users (username, online) 
+             VALUES ($1, TRUE)
+             ON CONFLICT (username) DO UPDATE SET online = TRUE`,
+            [username],
+            (err) => {
+                if (err) {
+                    console.error('Error saving user:', err);
+                    return;
+                }
+
+                // Send the users list to all clients
+                updateUsersList();
+            }
+        );
+
         // Load the user's message history on login
         loadPrivateMessageHistory(username, null, (messages) => {
             socket.emit('chat history', messages);
@@ -80,11 +99,18 @@ io.on('connection', (socket) => {
     socket.on('disconnect', () => {
         console.log('A user disconnected');
         if (socket.username) {
-            users[socket.username].online = false;
-            io.emit('users list', Object.keys(users).map(user => ({
-                username: user,
-                online: users[user].online
-            })));
+            // Mark the user as offline
+            pool.query(
+                `UPDATE users SET online = FALSE WHERE username = $1`,
+                [socket.username],
+                (err) => {
+                    if (err) {
+                        console.error('Error marking user offline:', err);
+                    } else {
+                        updateUsersList();
+                    }
+                }
+            );
         }
     });
 });
@@ -140,6 +166,26 @@ function loadPrivateMessageHistory(user1, user2, callback) {
         }));
         callback(messages);
     });
+}
+
+// Function to update the users list
+function updateUsersList() {
+    pool.query(
+        `SELECT username, online FROM users`,
+        (err, result) => {
+            if (err) {
+                console.error('Error fetching users list:', err);
+                return;
+            }
+
+            const users = result.rows.map(row => ({
+                username: row.username,
+                online: row.online,
+            }));
+
+            io.emit('users list', users);
+        }
+    );
 }
 
 const PORT = process.env.PORT || 3000;
