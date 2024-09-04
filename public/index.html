@@ -124,7 +124,42 @@
 
     <script src="/socket.io/socket.io.js"></script>
     <script>
-        const socket = io();
+         const socket = io();
+    const loginButton = document.getElementById('login-button');
+    const usernameInput = document.getElementById('username-input');
+    const passwordInput = document.getElementById('password-input');
+
+    loginButton.addEventListener('click', () => {
+        const username = usernameInput.value.trim();
+        const password = passwordInput.value.trim();
+        if (username && password) {
+            socket.emit('login', { username, password });
+        }
+    });
+
+    socket.on('require password setup', () => {
+        passwordInput.style.display = 'block';
+        loginButton.textContent = 'Set Password';
+        loginButton.onclick = () => {
+            const username = usernameInput.value.trim();
+            const password = passwordInput.value.trim();
+            if (username && password) {
+                socket.emit('setup password', { username, password });
+            }
+        };
+    });
+
+    socket.on('password setup successful', () => {
+        alert('Password set up successfully. Please log in.');
+        location.reload();
+    });
+
+    socket.on('login failed', (message) => {
+        alert(message);
+    });
+
+    socket.on('chat message', (data) => {
+        displayMessage(data);
 
         // Request notification permission when the page loads
         document.addEventListener('DOMContentLoaded', () => {
