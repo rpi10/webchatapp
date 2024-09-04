@@ -6,7 +6,6 @@
     <title>Web Chat App</title>
     <style>
         body { display: flex; height: 100vh; margin: 0; }
-        
         #sidebar { width: 200px; padding: 10px; background: #f4f4f4; border-right: 1px solid #ccc; overflow-y: auto; }
         #chat-area { flex: 1; padding: 10px; display: flex; flex-direction: column; }
         ul { list-style-type: none; padding: 0; margin: 0; }
@@ -92,7 +91,7 @@
             #sidebar { width: 100%; max-width: none; height: auto; position: static; border-right: none; border-bottom: 1px solid #ccc; }
             #chat-area { width: 100%; margin-left: 0; }
             button { width: 35px; height: 35px; }
-        }    
+        }
     </style>
 </head>
 <body>
@@ -101,6 +100,7 @@
         <div id="login-box">
             <h2>Login</h2>
             <input id="username-input" type="text" placeholder="Enter your username" />
+            <input id="password-input" type="password" placeholder="Enter your password" />
             <button id="login-button">Login</button>
         </div>
     </div>
@@ -123,176 +123,178 @@
     <audio id="beep-sound" src="ring-tone.mp3" preload="auto"></audio>
 
     <script src="/socket.io/socket.io.js"></script>
-   <script>
-    const socket = io();
+    <script>
+        const socket = io();
 
-    // Request notification permission when the page loads
-    document.addEventListener('DOMContentLoaded', () => {
-        if (Notification.permission !== 'granted') {
-            Notification.requestPermission().then(permission => {
-                if (permission === 'granted') {
-                    console.log('Notification permission granted.');
+        // Request notification permission when the page loads
+        document.addEventListener('DOMContentLoaded', () => {
+            if (Notification.permission !== 'granted') {
+                Notification.requestPermission().then(permission => {
+                    if (permission === 'granted') {
+                        console.log('Notification permission granted.');
+                    }
+                });
+            }
+        });
+
+        const form = document.getElementById('form');
+        const input = document.getElementById('input');
+        const messages = document.getElementById('messages');
+        const usersList = document.getElementById('users-list');
+        const loginScreen = document.getElementById('login-screen');
+        const loginButton = document.getElementById('login-button');
+        const usernameInput = document.getElementById('username-input');
+        const passwordInput = document.getElementById('password-input');
+        let currentUser = null;
+        let currentConversation = null;
+        let unseenMessages = {}; // Track unseen messages count
+
+        function showNotification(title, body) {
+            if (Notification.permission === 'granted') {
+                new Notification(title, {
+                    body: body,
+                    icon: '/path/to/icon.png' // Optional: Add an icon
+                });
+            }
+        }
+
+        function setUsername(username, password) {
+            localStorage.setItem('username', username);
+            socket.emit('set username', { username, password });
+        }
+
+        function getUsername() {
+            return localStorage.getItem('username');
+        }
+
+        function updateConversation(conversation) {
+            currentConversation = conversation;
+            document.getElementById('chat-header').textContent = `Chat with ${conversation}`;
+            document.querySelectorAll('#users-list li').forEach(li => li.classList.remove('selected'));
+            const item = Array.from(usersList.children).find(li => li.textContent.trim() === conversation);
+            if (item) {
+                item.classList.add('selected');
+            }
+            messages.innerHTML = ''; // Clear messages before loading new ones
+            socket.emit('load messages', { user: currentConversation });
+        }
+
+        function displayMessage({ from, to, msg }) {
+            if (to === currentConversation || from === currentConversation) {
+                const item = document.createElement('li');
+                item.style.backgroundColor = from === currentUser ? '#E2FFC7' : '#f1ecec';
+                item.style.color = 'black';
+                item.textContent = `${from}: ${msg}`;
+                messages.appendChild(item);
+                messages.scrollTop = messages.scrollHeight;  // Scroll to the bottom
+            }
+        }
+
+        function playBeep() {
+            const beepSound = document.getElementById('beep-sound');
+            beepSound.play();
+        }
+
+        function getUnseenMessages(username) {
+            return unseenMessages[username] || 0;
+        }
+
+        function resetUnseenCount(username) {
+            unseenMessages[username] = 0;
+            const userItem = Array.from(usersList.children).find(li => li.textContent.trim().startsWith(username));
+            if (userItem) {
+                userItem.querySelectorAll('.unseen-count').forEach(count => count.remove());
+            }
+        }
+
+        loginButton.addEventListener('click', () => {
+            const username = usernameInput.value.trim();
+            const password = passwordInput.value.trim();
+            if (username && password) {
+                setUsername(username, password);
+                currentUser = username;
+                loginScreen.style.display = 'none'; // Hide login screen after login
+            }
+        });
+
+        socket.on('connect', () => {
+            const storedUsername = getUsername();
+            if (storedUsername) {
+                setUsername(storedUsername);
+                currentUser = storedUsername;
+                loginScreen.style.display = 'none'; // Hide login screen if already logged in
+            }
+        });
+
+        socket.on('chat message', (data) => {
+            displayMessage(data);
+            if (data.from !== currentUser) {
+                playBeep();
+                showNotification(data.from, data.msg); // Show notification for received message
+                unseenMessages[data.from] = (unseenMessages[data.from] || 0) + 1;
+                const userItem = Array.from(usersList.children).find(li => li.textContent.trim().startsWith(data.from));
+                if (userItem) {
+                    let count = userItem.querySelector('.unseen-count');
+                    if (!count) {
+                        count = document.createElement('span');
+                        count.className = 'unseen-count';
+                        userItem.appendChild(count);
+                    }
+                    count.textContent = unseenMessages[data.from];
+                }
+            }
+        });
+
+        socket.on('chat history', (messages) => {
+            messages.forEach(displayMessage);
+        });
+
+        socket.on('users list', (users) => {
+            const currentUser = getUsername();
+            usersList.innerHTML = '';
+            users.forEach(user => {
+                if (user.username !== currentUser) {  // Check to exclude the current user
+                    const item = document.createElement('li');
+                    const status = document.createElement('span');
+                    status.className = `online-status ${user.online ? 'online' : 'offline'}`;
+                    item.appendChild(status);
+                    item.appendChild(document.createTextNode(user.username));
+                    const unseenCount = getUnseenMessages(user.username);
+                    if (unseenCount > 0) {
+                        const count = document.createElement('span');
+                        count.className = 'unseen-count';
+                        count.textContent = unseenCount;
+                        item.appendChild(count);
+                    }
+                    item.addEventListener('click', () => {
+                        updateConversation(user.username);
+                        resetUnseenCount(user.username);
+                    });
+                    usersList.appendChild(item);
                 }
             });
-        }
-    });
+        });
 
-    const form = document.getElementById('form');
-    const input = document.getElementById('input');
-    const messages = document.getElementById('messages');
-    const usersList = document.getElementById('users-list');
-    const loginScreen = document.getElementById('login-screen');
-    const loginButton = document.getElementById('login-button');
-    const usernameInput = document.getElementById('username-input');
-    let currentUser = null;
-    let currentConversation = null;
-    let unseenMessages = {}; // Track unseen messages count
+        form.addEventListener('submit', (e) => {
+            e.preventDefault();
+            if (input.value && currentConversation) {
+                const message = input.value;
+                socket.emit('chat message', { to: currentConversation, msg: message });
+                input.value = '';
 
-    function showNotification(title, body) {
-        if (Notification.permission === 'granted') {
-            new Notification(title, {
-                body: body,
-                icon: '/path/to/icon.png' // Optional: Add an icon
-            });
-        }
-    }
+                // Trigger notification for sent message
+                showNotification('You', message);
+            }
+        });
 
-    function setUsername(username) {
-        localStorage.setItem('username', username);
-        socket.emit('set username', username);
-    }
-
-    function getUsername() {
-        return localStorage.getItem('username');
-    }
-
-    function updateConversation(conversation) {
-        currentConversation = conversation;
-        document.getElementById('chat-header').textContent = `Chat with ${conversation}`;
-        document.querySelectorAll('#users-list li').forEach(li => li.classList.remove('selected'));
-        const item = Array.from(usersList.children).find(li => li.textContent.trim() === conversation);
-        if (item) {
-            item.classList.add('selected');
-        }
-        messages.innerHTML = ''; // Clear messages before loading new ones
-        socket.emit('load messages', { user: currentConversation });
-    }
-
-    function displayMessage({ from, to, msg }) {
-        if (to === currentConversation || from === currentConversation) {
-            const item = document.createElement('li');
-            item.style.backgroundColor = from === currentUser ? '#E2FFC7' : '#f1ecec';
-            item.style.color = 'black';
-            item.textContent = `${from}: ${msg}`;
-            messages.appendChild(item);
-            messages.scrollTop = messages.scrollHeight;  // Scroll to the bottom
-        }
-    }
-
-    function playBeep() {
-        const beepSound = document.getElementById('beep-sound');
-        beepSound.play();
-    }
-
-    function getUnseenMessages(username) {
-        return unseenMessages[username] || 0;
-    }
-
-    function resetUnseenCount(username) {
-        unseenMessages[username] = 0;
-        const userItem = Array.from(usersList.children).find(li => li.textContent.trim().startsWith(username));
-        if (userItem) {
-            userItem.querySelectorAll('.unseen-count').forEach(count => count.remove());
-        }
-    }
-
-    loginButton.addEventListener('click', () => {
-        const username = usernameInput.value.trim();
-        if (username) {
-            setUsername(username);
-            currentUser = username;
-            loginScreen.style.display = 'none'; // Hide login screen after login
-        }
-    });
-
-    socket.on('connect', () => {
+        // On page load, check if the user is already logged in
         const storedUsername = getUsername();
         if (storedUsername) {
-            setUsername(storedUsername);
+            socket.emit('set username', storedUsername);
             currentUser = storedUsername;
             loginScreen.style.display = 'none'; // Hide login screen if already logged in
         }
-    });
-
-    socket.on('chat message', (data) => {
-        displayMessage(data);
-        if (data.from !== currentUser) {
-            playBeep();
-            showNotification(data.from, data.msg); // Show notification for received message
-            unseenMessages[data.from] = (unseenMessages[data.from] || 0) + 1;
-            const userItem = Array.from(usersList.children).find(li => li.textContent.trim().startsWith(data.from));
-            if (userItem) {
-                let count = userItem.querySelector('.unseen-count');
-                if (!count) {
-                    count = document.createElement('span');
-                    count.className = 'unseen-count';
-                    userItem.appendChild(count);
-                }
-                count.textContent = unseenMessages[data.from];
-            }
-        }
-    });
-
-    socket.on('chat history', (messages) => {
-        messages.forEach(displayMessage);
-    });
-
-    socket.on('users list', (users) => {
-        const currentUser = getUsername();
-        usersList.innerHTML = '';
-        users.forEach(user => {
-            if (user.username !== currentUser) {  // Check to exclude the current user
-                const item = document.createElement('li');
-                const status = document.createElement('span');
-                status.className = `online-status ${user.online ? 'online' : 'offline'}`;
-                item.appendChild(status);
-                item.appendChild(document.createTextNode(user.username));
-                const unseenCount = getUnseenMessages(user.username);
-                if (unseenCount > 0) {
-                    const count = document.createElement('span');
-                    count.className = 'unseen-count';
-                    count.textContent = unseenCount;
-                    item.appendChild(count);
-                }
-                item.addEventListener('click', () => {
-                    updateConversation(user.username);
-                    resetUnseenCount(user.username);
-                });
-                usersList.appendChild(item);
-            }
-        });
-    });
-
-    form.addEventListener('submit', (e) => {
-        e.preventDefault();
-        if (input.value && currentConversation) {
-            const message = input.value;
-            socket.emit('chat message', { to: currentConversation, msg: message });
-            input.value = '';
-
-            // Trigger notification for sent message
-            showNotification('You', message);
-        }
-    });
-
-    // On page load, check if the user is already logged in
-    const storedUsername = getUsername();
-    if (storedUsername) {
-        socket.emit('set username', storedUsername);
-        currentUser = storedUsername;
-        loginScreen.style.display = 'none'; // Hide login screen if already logged in
-    }
-</script>
+    </script>
 
 </body>
 </html>
