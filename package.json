@@ -1,22 +1,20 @@
 {
-  "name": "openchat",
+  "name": "web-chat-app",
   "version": "1.0.0",
+  "description": "A real-time chat application",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
   },
   "dependencies": {
     "express": "^4.17.1",
-    "http": "^0.0.1-security",
     "socket.io": "^4.0.0",
-    "sqlite3": "^5.0.0",
     "pg": "^8.7.3",
-    "path": "^0.12.7",
-    "dotenv": "^16.0.0"  // replace with the installed version
+    "dotenv": "^16.0.0"
   },
   "engines": {
-    "node": ">=14.0.0"
+    "node": ">=14.x"
   },
-  "author": "Jeremie",
+  "author": "",
   "license": "ISC"
 }
