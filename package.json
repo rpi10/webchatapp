@@ -11,8 +11,8 @@
     "socket.io": "^4.0.0",
     "sqlite3": "^5.0.0",
     "pg": "^8.7.3",
-    "path": "^0.12.7"
-    "dotenv": "^16.0.0",  // replace with the installed version
+    "path": "^0.12.7",
+    "dotenv": "^16.0.0"  // replace with the installed version
   },
   "engines": {
     "node": ">=14.0.0"
