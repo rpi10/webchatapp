@@ -16,7 +16,7 @@ app.use(express.static(path.join(__dirname, 'public')));
 
 // Middleware for session management
 app.use(session({
-    secret: process.env.SESSION_SECRET || 'your-secret-key',  // Set this in your environment variables
+    secret: process.env.SESSION_SECRET || 'your-secret-key',
     resave: false,
     saveUninitialized: true,
     cookie: { secure: false } // Set to true if using HTTPS
@@ -24,10 +24,8 @@ app.use(session({
 
 // Initialize PostgreSQL pool
 const pool = new Pool({
-    connectionString: process.env.DATABASE_URL, // Set this in your Render environment variables
-    ssl: {
-        rejectUnauthorized: false,
-    },
+    connectionString: process.env.DATABASE_URL,
+    ssl: { rejectUnauthorized: false },
 });
 
 // Create or update tables if necessary
@@ -54,6 +52,7 @@ pool.query(`
     }
 });
 
+// Track users and their socket connections
 const users = {};  // {username: {socketId: socketId, online: boolean}}
 
 io.on('connection', (socket) => {
@@ -67,23 +66,27 @@ io.on('connection', (socket) => {
 
             if (user) {
                 if (!user.password) {
-                    // User exists but no password set, require them to set a password
+                    // Require password setup for new users without a password
                     socket.emit('require password setup');
                 } else {
-                    // Validate the password
+                    // Check if password matches
                     const match = await bcrypt.compare(password, user.password);
                     if (match) {
-                        // Password correct, log in the user
+                        // Successful login
                         socket.username = username;
 
-                        // Update online status
+                        // Update online status in DB and broadcast users list
                         await pool.query('UPDATE users SET online = TRUE WHERE username = $1', [username]);
+                        users[username] = { socketId: socket.id, online: true };
 
-                        // Update session
+                        // Save session information
                         socket.request.session.username = username;
                         socket.request.session.save();
 
+                        // Update the users list for everyone
                         updateUsersList();
+                        
+                        // Load and send chat history to the user
                         loadPrivateMessageHistory(username, null, (messages) => {
                             socket.emit('chat history', messages);
                         });
@@ -96,66 +99,70 @@ io.on('connection', (socket) => {
             }
         } catch (err) {
             console.error('Error during login:', err);
+            socket.emit('login failed', 'An error occurred.');
         }
     });
 
-    // Handle new password setup
+    // Handle new password setup for users without a password
     socket.on('setup password', async ({ username, password }) => {
         try {
             const hashedPassword = await bcrypt.hash(password, 10);
-
             await pool.query('UPDATE users SET password = $1 WHERE username = $2', [hashedPassword, username]);
-
             socket.emit('password setup successful');
-            // After setting the password, the user can log in as normal
         } catch (err) {
             console.error('Error setting up password:', err);
             socket.emit('setup failed', 'Password setup failed.');
         }
     });
 
+    // Handle sending chat messages
     socket.on('chat message', ({ to, msg }) => {
-        const message = { from: socket.username, msg, to };
+        if (!socket.username) return;
 
-        // Save the message to the database
+        const message = { from: socket.username, msg, to };
         saveMessage(socket.username, to, msg);
 
-        // Notify the recipient if they are online
+        // Deliver message to the recipient if online
         if (users[to] && users[to].online) {
             io.to(users[to].socketId).emit('chat message', message);
             io.to(users[to].socketId).emit('new message notification', { from: socket.username, msg });
         }
 
-        // Also send the message back to the sender
+        // Echo message back to the sender
         socket.emit('chat message', message);
     });
 
+    // Load messages between two users
     socket.on('load messages', ({ user }) => {
-        loadPrivateMessageHistory(socket.username, user, (messages) => {
-            socket.emit('chat history', messages);
-        });
+        if (socket.username) {
+            loadPrivateMessageHistory(socket.username, user, (messages) => {
+                socket.emit('chat history', messages);
+            });
+        }
     });
 
+    // Handle user disconnecting
     socket.on('disconnect', () => {
-        console.log('A user disconnected');
         if (socket.username) {
-            // Mark the user as offline
             pool.query(
-                `UPDATE users SET online = FALSE WHERE username = $1`,
+                'UPDATE users SET online = FALSE WHERE username = $1',
                 [socket.username],
                 (err) => {
                     if (err) {
                         console.error('Error marking user offline:', err);
                     } else {
+                        // Update user's online status
+                        users[socket.username].online = false;
                         updateUsersList();
                     }
                 }
             );
         }
+        console.log('A user disconnected');
     });
 });
 
-// Function to save a message to the PostgreSQL database
+// Save messages to the PostgreSQL database
 function saveMessage(sender, receiver, message) {
     pool.query(
         'INSERT INTO messages (sender, receiver, message) VALUES ($1, $2, $3)',
@@ -168,13 +175,11 @@ function saveMessage(sender, receiver, message) {
     );
 }
 
-// Function to load private message history between two users
+// Load private message history between two users
 function loadPrivateMessageHistory(user1, user2, callback) {
-    let query;
-    let params;
-
+    let query, params;
     if (user2) {
-        // Load messages between two users
+        // Load conversation between user1 and user2
         query = `
             SELECT sender, receiver, message, timestamp
             FROM messages
@@ -183,7 +188,7 @@ function loadPrivateMessageHistory(user1, user2, callback) {
         `;
         params = [user1, user2];
     } else {
-        // Load all messages involving the user
+        // Load all messages involving user1
         query = `
             SELECT sender, receiver, message, timestamp
             FROM messages
@@ -208,26 +213,27 @@ function loadPrivateMessageHistory(user1, user2, callback) {
     });
 }
 
-// Function to update the users list
+// Update users list and notify all connected clients
 function updateUsersList() {
     pool.query(
-        `SELECT username, online FROM users`,
+        'SELECT username, online FROM users',
         (err, result) => {
             if (err) {
                 console.error('Error fetching users list:', err);
                 return;
             }
 
-            const users = result.rows.map(row => ({
+            const userList = result.rows.map(row => ({
                 username: row.username,
                 online: row.online,
             }));
 
-            io.emit('users list', users);
+            io.emit('users list', userList);  // Broadcast users list to all clients
         }
     );
 }
 
+// Start the server
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
