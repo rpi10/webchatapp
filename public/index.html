@@ -123,7 +123,7 @@
     <audio id="beep-sound" src="ring-tone.mp3" preload="auto"></audio>
 
     <script src="/socket.io/socket.io.js"></script>
-  <script>
+ <script>
     const socket = io(); // Ensure you are using HTTPS
     const form = document.getElementById('form');
     const input = document.getElementById('input');
@@ -174,7 +174,11 @@
         const confirmed = confirm(`User ${username} does not exist. Would you like to sign up?`);
         if (confirmed) {
             const password = passwordInput.value.trim();
-            socket.emit('signup', { username, password });
+            if (password) {
+                socket.emit('signup', { username, password });
+            } else {
+                alert('Please enter a password.');
+            }
         }
     });
 
@@ -188,6 +192,17 @@
 
     // If login fails (invalid password or other issue)
     socket.on('login failed', (message) => {
+        alert(message);
+    });
+
+    // Handle password setup response
+    socket.on('password setup successful', () => {
+        alert('Password setup successful! You are now logged in.');
+        loginScreen.style.display = 'none';
+        socket.emit('load users');
+    });
+
+    socket.on('setup failed', (message) => {
         alert(message);
     });
 
