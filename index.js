@@ -242,6 +242,26 @@ function updateUsersList() {
         }
     );
 }
+// Handle new password setup for users without a password
+socket.on('setup password', async ({ username, password }) => {
+    try {
+        // Hash the new password
+        const hashedPassword = await bcrypt.hash(password, 10);
+        // Update the user's password in the database
+        await pool.query('UPDATE users SET password = $1 WHERE username = $2', [hashedPassword, username]);
+        socket.emit('password setup successful');
+        
+        // Now login the user
+        socket.username = username;
+        users[username] = { socketId: socket.id, online: true };
+        socket.request.session.username = username;
+        socket.request.session.save();
+        updateUsersList(); // Update the users list for everyone
+    } catch (err) {
+        console.error('Error setting up password:', err);
+        socket.emit('setup failed', 'Password setup failed.');
+    }
+});
 
 // Start the server
 const PORT = process.env.PORT || 3000;
