@@ -5,11 +5,15 @@ const { Pool } = require('pg');
 const path = require('path');
 const bcrypt = require('bcrypt');
 const session = require('express-session');
+const cors = require('cors');
 require('dotenv').config();
 
 const app = express();
 const server = http.createServer(app);
 const io = socketIo(server);
+
+// CORS configuration
+app.use(cors());
 
 // Serve static files from the "public" directory
 app.use(express.static(path.join(__dirname, 'public')));
@@ -19,8 +23,10 @@ app.use(session({
     secret: process.env.SESSION_SECRET || 'your-secret-key',
     resave: false,
     saveUninitialized: true,
-    secure: process.env.NODE_ENV === 'production', // Use true for HTTPS
-    cookie: { maxAge: 24 * 60 * 60 * 1000 } // Set cookie expiration to 1 day
+    cookie: {
+        secure: process.env.NODE_ENV === 'production', // Use secure cookies in production
+        maxAge: 24 * 60 * 60 * 1000 // Set cookie expiration to 1 day
+    }
 }));
 
 // Initialize PostgreSQL pool
@@ -118,7 +124,7 @@ io.on('connection', (socket) => {
             socket.request.session.save();
 
             // Notify success and update users list
-            socket.emit('signup success', 'Signup successful. You are now logged in.');
+            socket.emit('signup successful', username);
             updateUsersList();
 
         } catch (err) {
@@ -238,27 +244,32 @@ function updateUsersList() {
                 online: row.online,
             }));
 
-            io.emit('users list', userList);  // Broadcast users list to all clients
+            io.emit('users', userList);  // Broadcast users list to all clients
         }
     );
 }
 
 // Handle new password setup for users without a password
-io.on('setup password', async ({ username, password }) => {
-    try {
-        // Hash the new password
-        const hashedPassword = await bcrypt.hash(password, 10);
-        // Update the user's password in the database
-        await pool.query('UPDATE users SET password = $1 WHERE username = $2', [hashedPassword, username]);
-        io.to(users[username].socketId).emit('password setup successful');
-        
-        // Now login the user
-        users[username] = { socketId: users[username].socketId, online: true };
-        updateUsersList(); // Update the users list for everyone
-    } catch (err) {
-        console.error('Error setting up password:', err);
-        io.to(users[username].socketId).emit('setup failed', 'Password setup failed.');
-    }
+io.on('connection', (socket) => {
+    socket.on('setup password', async ({ username, password }) => {
+        try {
+            // Hash the new password
+            const hashedPassword = await bcrypt.hash(password, 10);
+            // Update the user's password in the database
+            await pool.query('UPDATE users SET password = $1 WHERE username = $2', [hashedPassword, username]);
+            socket.emit('password setup successful');
+            
+            // Now login the user
+            socket.username = username;
+            users[username] = { socketId: socket.id, online: true };
+            socket.request.session.username = username;
+            socket.request.session.save();
+            updateUsersList(); // Update the users list for everyone
+        } catch (err) {
+            console.error('Error setting up password:', err);
+            socket.emit('setup failed', 'Password setup failed.');
+        }
+    });
 });
 
 // Start the server
