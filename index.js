@@ -32,7 +32,16 @@ app.use(session({
 // Initialize PostgreSQL pool
 const pool = new Pool({
     connectionString: process.env.DATABASE_URL,
-    ssl: { rejectUnauthorized: false },
+    ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
+});
+
+// Test database connection
+pool.query('SELECT NOW()', (err, res) => {
+    if (err) {
+        console.error('Error connecting to the database:', err);
+    } else {
+        console.log('Connected to the database successfully');
+    }
 });
 
 // Create or update tables if necessary
@@ -73,41 +82,21 @@ io.on('connection', (socket) => {
 
             if (user) {
                 if (!user.password) {
-                    // Prompt for password setup for users without a password
                     socket.emit('prompt signup', 'User exists but no password set. Would you like to set a password?');
                 } else {
-                    // Check if password matches
                     const match = await bcrypt.compare(password, user.password);
                     if (match) {
-                        // Successful login
-                        socket.username = username;
-
-                        // Update online status in DB and broadcast users list
-                        await pool.query('UPDATE users SET online = TRUE WHERE username = $1', [username]);
-                        users[username] = { socketId: socket.id, online: true };
-
-                        // Save session information
-                        socket.request.session.username = username;
-                        socket.request.session.save();
-
-                        // Update the users list for everyone
-                        updateUsersList();
-                        
-                        // Load and send chat history to the user
-                        loadPrivateMessageHistory(username, null, (messages) => {
-                            socket.emit('chat history', messages);
-                        });
+                        await loginUser(socket, username);
                     } else {
                         socket.emit('login failed', 'Invalid password.');
                     }
                 }
             } else {
-                // New user, prompt for signup
                 socket.emit('prompt signup', 'User not found. Would you like to sign up?');
             }
         } catch (err) {
             console.error('Error during login:', err);
-            socket.emit('login failed', 'An error occurred.');
+            socket.emit('login failed', 'An error occurred during login. Please try again.');
         }
     });
 
@@ -116,17 +105,7 @@ io.on('connection', (socket) => {
         try {
             const hashedPassword = await bcrypt.hash(password, 10);
             await pool.query('INSERT INTO users (username, password, online) VALUES ($1, $2, TRUE)', [username, hashedPassword]);
-
-            // Mark the user as online and save session
-            users[username] = { socketId: socket.id, online: true };
-            socket.username = username;
-            socket.request.session.username = username;
-            socket.request.session.save();
-
-            // Notify success and update users list
-            socket.emit('signup successful', username);
-            updateUsersList();
-
+            await loginUser(socket, username);
         } catch (err) {
             console.error('Error during signup:', err);
             socket.emit('signup failed', 'Signup failed. User may already exist.');
@@ -168,7 +147,9 @@ io.on('connection', (socket) => {
                     if (err) {
                         console.error('Error marking user offline:', err);
                     } else {
-                        users[socket.username].online = false;
+                        if (users[socket.username]) {
+                            users[socket.username].online = false;
+                        }
                         updateUsersList();
                     }
                 }
@@ -187,17 +168,27 @@ io.on('connection', (socket) => {
             socket.emit('password setup successful');
             
             // Now login the user
-            socket.username = username;
-            users[username] = { socketId: socket.id, online: true };
-            socket.request.session.username = username;
-            socket.request.session.save();
-            updateUsersList(); // Update the users list for everyone
+            await loginUser(socket, username);
         } catch (err) {
             console.error('Error setting up password:', err);
             socket.emit('setup failed', 'Password setup failed.');
         }
     });
 });
+
+// Helper function to login user
+async function loginUser(socket, username) {
+    await pool.query('UPDATE users SET online = TRUE WHERE username = $1', [username]);
+    users[username] = { socketId: socket.id, online: true };
+    socket.username = username;
+    socket.request.session.username = username;
+    socket.request.session.save();
+    socket.emit('login success', username);
+    updateUsersList();
+    loadPrivateMessageHistory(username, null, (messages) => {
+        socket.emit('chat history', messages);
+    });
+}
 
 // Save messages to the PostgreSQL database
 function saveMessage(sender, receiver, message) {
@@ -238,6 +229,7 @@ function loadPrivateMessageHistory(user1, user2, callback) {
     pool.query(query, params, (err, result) => {
         if (err) {
             console.error('Error loading message history:', err);
+            callback([]);
             return;
         }
         const messages = result.rows.map(row => ({
