@@ -123,197 +123,158 @@
     <audio id="beep-sound" src="ring-tone.mp3" preload="auto"></audio>
 
     <script src="/socket.io/socket.io.js"></script>
-   <script>
-   const socket = io();
-const form = document.getElementById('form');
-const input = document.getElementById('input');
-const messages = document.getElementById('messages');
-const usersList = document.getElementById('users-list');
-const loginScreen = document.getElementById('login-screen');
-const usernameInput = document.getElementById('username-input');
-const passwordInput = document.getElementById('password-input');
-const loginButton = document.getElementById('login-button');
-const signupButton = document.getElementById('signup-button');
-const setupPasswordButton = document.getElementById('setup-password-button');
+  <script>
+    const socket = io(); // Ensure you are using HTTPS
+    const form = document.getElementById('form');
+    const input = document.getElementById('input');
+    const messages = document.getElementById('messages');
+    const usersList = document.getElementById('users-list');
+    const loginScreen = document.getElementById('login-screen');
+    const loginButton = document.getElementById('login-button');
+    const usernameInput = document.getElementById('username-input');
+    const passwordInput = document.getElementById('password-input');
+    let currentUser = null;
+    let currentConversation = null;
+    let unseenMessages = {}; // Track unseen messages count
 
-let currentUser = null;
-let currentConversation = null;
-let unseenMessages = {}; // Track unseen messages count
-
-// Play sound for new message
-function playBeep() {
-    const beepSound = document.getElementById('beep-sound');
-    if (beepSound) beepSound.play();
-}
-
-// Show notification for messages
-function showNotification(title, body) {
-    if (Notification.permission === 'granted') {
-        new Notification(title, {
-            body: body,
-            icon: '/path/to/icon.png' // Optional: Add an icon
-        });
+    // Play sound for new message
+    function playBeep() {
+        const beepSound = document.getElementById('beep-sound');
+        beepSound.play();
     }
-}
 
-// Handle login button click
-loginButton.addEventListener('click', () => {
-    const username = usernameInput.value.trim();
-    const password = passwordInput.value.trim();
-    if (username && password) {
-        socket.emit('login', { username, password });
-    } else {
-        alert('Please enter both username and password.');
+    // Show notification for messages
+    function showNotification(title, body) {
+        if (Notification.permission === 'granted') {
+            new Notification(title, {
+                body: body,
+                icon: '/path/to/icon.png' // Optional: Add an icon
+            });
+        }
     }
-});
 
-// Handle signup button click
-signupButton.addEventListener('click', () => {
-    const username = usernameInput.value.trim();
-    const password = passwordInput.value.trim();
-    if (username && password) {
-        socket.emit('signup', { username, password });
-    } else {
-        alert('Please enter both username and password.');
-    }
-});
-
-// Handle setup password button click
-setupPasswordButton.addEventListener('click', () => {
-    const username = usernameInput.value.trim();
-    const password = passwordInput.value.trim();
-    if (username && password) {
-        socket.emit('setup password', { username, password });
-    } else {
-        alert('Please enter both username and password.');
-    }
-});
-
-// Switch to chat screen
-function switchToChat() {
-    loginScreen.style.display = 'none';
-    document.getElementById('chat-screen').style.display = 'block';
-}
-
-// Handle login success
-socket.on('login success', (username) => {
-    currentUser = username;
-    switchToChat();
-    socket.emit('load users'); // Load users once logged in
-});
-
-// Handle signup success
-socket.on('signup successful', (username) => {
-    alert('Signup successful! You are now logged in.');
-    currentUser = username;
-    switchToChat();
-    socket.emit('load users'); // Load users after successful signup
-});
-
-// Handle signup prompt
-socket.on('require sign up', (username) => {
-    const confirmed = confirm(`User ${username} does not exist. Would you like to sign up?`);
-    if (confirmed) {
+    // Handle login or signup
+    loginButton.addEventListener('click', () => {
+        const username = usernameInput.value.trim();
         const password = passwordInput.value.trim();
-        socket.emit('signup', { username, password });
-    }
-});
-
-// Handle setup password prompt
-socket.on('require password setup', () => {
-    setupPasswordButton.style.display = 'block';
-});
-
-// If login fails (invalid password or other issue)
-socket.on('login failed', (message) => {
-    alert(message);
-});
-
-// Display messages in the chat window
-function displayMessage({ from, msg }) {
-    const item = document.createElement('li');
-    item.className = from === currentUser ? 'message-from-me' : 'message-from-others';
-    item.textContent = `${from}: ${msg}`;
-    messages.appendChild(item);
-    messages.scrollTop = messages.scrollHeight;  // Scroll to the bottom
-}
-
-// Update the conversation view when switching between users
-function updateConversation(conversation) {
-    currentConversation = conversation;
-    document.getElementById('chat-header').textContent = `Chat with ${conversation}`;
-    document.querySelectorAll('#users-list li').forEach(li => li.classList.remove('selected'));
-    const item = Array.from(usersList.children).find(li => li.textContent.trim() === conversation);
-    if (item) {
-        item.classList.add('selected');
-    }
-    messages.innerHTML = ''; // Clear previous messages before loading new ones
-    socket.emit('load messages', { user: currentConversation });
-}
-
-// Handle receiving new chat messages
-socket.on('chat message', (data) => {
-    displayMessage(data);
-    if (data.from !== currentUser) {
-        playBeep();
-        showNotification(data.from, data.msg); // Show notification for new messages
-        unseenMessages[data.from] = (unseenMessages[data.from] || 0) + 1;
-        const userItem = Array.from(usersList.children).find(li => li.textContent.trim().startsWith(data.from));
-        if (userItem) {
-            let count = userItem.querySelector('.unseen-count');
-            if (!count) {
-                count = document.createElement('span');
-                count.className = 'unseen-count';
-                userItem.appendChild(count);
-            }
-            count.textContent = unseenMessages[data.from];
+        if (username && password) {
+            socket.emit('login', { username, password });
         }
-    }
-});
-
-// Display chat history (old messages)
-socket.on('chat history', (msgs) => {
-    msgs.forEach(msg => displayMessage(msg));
-});
-
-// Handle sending new messages
-form.addEventListener('submit', function(e) {
-    e.preventDefault();
-    if (input.value && currentConversation) {
-        socket.emit('chat message', { to: currentConversation, msg: input.value });
-        input.value = ''; // Clear input field
-    }
-});
-
-// Load and display the list of users
-socket.on('users', function(users) {
-    usersList.innerHTML = ''; // Clear previous list
-    users.forEach(user => {
-        const item = document.createElement('li');
-        item.textContent = user.username;
-        if (user.online) {
-            const status = document.createElement('span');
-            status.classList.add('online-status', 'online');
-            item.prepend(status);
-        }
-        if (user.username === currentUser) {
-            item.style.fontWeight = 'bold';
-        }
-        item.addEventListener('click', () => {
-            unseenMessages[user.username] = 0; // Reset unseen count
-            const count = item.querySelector('.unseen-count');
-            if (count) count.remove();
-            updateConversation(user.username);
-        });
-        usersList.appendChild(item);
     });
-});
 
-// Request notification permission on page load
-if (Notification.permission !== 'granted') {
-    Notification.requestPermission();
-}
+    // If login is successful, hide login screen
+    socket.on('login success', (username) => {
+        currentUser = username;
+        loginScreen.style.display = 'none';
+        socket.emit('load users'); // Load users once logged in
+    });
 
+    // If login fails or requires signup
+    socket.on('require sign up', (username) => {
+        const confirmed = confirm(`User ${username} does not exist. Would you like to sign up?`);
+        if (confirmed) {
+            const password = passwordInput.value.trim();
+            socket.emit('signup', { username, password });
+        }
+    });
+
+    // Handle successful signup
+    socket.on('signup successful', (username) => {
+        alert('Signup successful! You are now logged in.');
+        currentUser = username;
+        loginScreen.style.display = 'none';
+        socket.emit('load users');
+    });
+
+    // If login fails (invalid password or other issue)
+    socket.on('login failed', (message) => {
+        alert(message);
+    });
+
+    // Display messages in the chat window
+    function displayMessage({ from, msg }) {
+        const item = document.createElement('li');
+        item.className = from === currentUser ? 'message-from-me' : 'message-from-others';
+        item.textContent = `${from}: ${msg}`;
+        messages.appendChild(item);
+        messages.scrollTop = messages.scrollHeight;  // Scroll to the bottom
+    }
+
+    // Update the conversation view when switching between users
+    function updateConversation(conversation) {
+        currentConversation = conversation;
+        document.getElementById('chat-header').textContent = `Chat with ${conversation}`;
+        document.querySelectorAll('#users-list li').forEach(li => li.classList.remove('selected'));
+        const item = Array.from(usersList.children).find(li => li.textContent.trim() === conversation);
+        if (item) {
+            item.classList.add('selected');
+        }
+        messages.innerHTML = ''; // Clear previous messages before loading new ones
+        socket.emit('load messages', { user: currentConversation });
+    }
+
+    // Handle receiving new chat messages
+    socket.on('chat message', (data) => {
+        displayMessage(data);
+        if (data.from !== currentUser) {
+            playBeep();
+            showNotification(data.from, data.msg); // Show notification for new messages
+            unseenMessages[data.from] = (unseenMessages[data.from] || 0) + 1;
+            const userItem = Array.from(usersList.children).find(li => li.textContent.trim().startsWith(data.from));
+            if (userItem) {
+                let count = userItem.querySelector('.unseen-count');
+                if (!count) {
+                    count = document.createElement('span');
+                    count.className = 'unseen-count';
+                    userItem.appendChild(count);
+                }
+                count.textContent = unseenMessages[data.from];
+            }
+        }
+    });
+
+    // Display chat history (old messages)
+    socket.on('chat history', (msgs) => {
+        msgs.forEach(msg => displayMessage(msg));
+    });
+
+    // Handle sending new messages
+    form.addEventListener('submit', function(e) {
+        e.preventDefault();
+        if (input.value && currentConversation) {
+            socket.emit('chat message', { to: currentConversation, msg: input.value });
+            input.value = ''; // Clear input field
+        }
+    });
+
+    // Load and display the list of users
+    socket.on('users', function(users) {
+        usersList.innerHTML = ''; // Clear previous list
+        users.forEach(user => {
+            const item = document.createElement('li');
+            item.textContent = user.username;
+            if (user.online) {
+                const status = document.createElement('span');
+                status.classList.add('online-status', 'online');
+                item.prepend(status);
+            }
+            if (user.username === currentUser) {
+                item.style.fontWeight = 'bold';
+            }
+            item.addEventListener('click', () => {
+                unseenMessages[user.username] = 0; // Reset unseen count
+                const count = item.querySelector('.unseen-count');
+                if (count) count.remove();
+                updateConversation(user.username);
+            });
+            usersList.appendChild(item);
+        });
+    });
+
+    // Request notification permission on page load
+    if (Notification.permission !== 'granted') {
+        Notification.requestPermission();
+    }
 </script>
 
 </body>
