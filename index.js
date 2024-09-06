@@ -19,7 +19,8 @@ app.use(session({
     secret: process.env.SESSION_SECRET || 'your-secret-key',
     resave: false,
     saveUninitialized: true,
-    cookie: { secure: true } // Set to true if using HTTPS
+      secure: true, // Ensure cookies are sent only over HTTPS
+        maxAge: 24 * 60 * 60 * 1000 // Set cookie expiration to 1 day
 }));
 
 // Initialize PostgreSQL pool
