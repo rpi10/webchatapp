@@ -124,7 +124,7 @@
 
     <script src="/socket.io/socket.io.js"></script>
     <script>
-        const socket = io(); // Ensure you are using HTTPS
+        const socket = io();
         const form = document.getElementById('form');
         const input = document.getElementById('input');
         const messages = document.getElementById('messages');
@@ -135,7 +135,7 @@
         const passwordInput = document.getElementById('password-input');
         let currentUser = null;
         let currentConversation = null;
-        let unseenMessages = {}; // Track unseen messages count
+        let unseenMessages = {};
 
         // Play sound for new message
         function playBeep() {
@@ -159,6 +159,8 @@
             const password = passwordInput.value.trim();
             if (username && password) {
                 socket.emit('login', { username, password });
+            } else {
+                alert('Please enter both username and password.');
             }
         });
 
@@ -166,18 +168,19 @@
         socket.on('login success', (username) => {
             currentUser = username;
             loginScreen.style.display = 'none';
-            socket.emit('load users'); // Load users once logged in
+            socket.emit('load users');
         });
 
         // Prompt for signup if user is not found or password is missing
         socket.on('prompt signup', (message) => {
             const confirmed = confirm(message);
             if (confirmed) {
+                const username = usernameInput.value.trim();
                 const password = passwordInput.value.trim();
-                if (password) {
-                    socket.emit('signup', { username: usernameInput.value.trim(), password });
+                if (username && password) {
+                    socket.emit('signup', { username, password });
                 } else {
-                    alert('Please enter a password.');
+                    alert('Please enter both username and password.');
                 }
             }
         });
@@ -192,6 +195,11 @@
 
         // If login fails (invalid password or other issue)
         socket.on('login failed', (message) => {
+            alert(message);
+        });
+
+        // Handle signup failure
+        socket.on('signup failed', (message) => {
             alert(message);
         });
 
