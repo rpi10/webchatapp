@@ -2,9 +2,9 @@
   "name": "web-chat-app",
   "version": "1.0.0",
   "description": "A real-time chat application",
-  "main": "index.js",
+  "main": "server.js",
   "scripts": {
-    "start": "node index.js"
+    "start": "node server.js"
   },
   "dependencies": {
     "express": "^4.17.1",
@@ -12,7 +12,8 @@
     "pg": "^8.7.3",
     "bcrypt": "^5.1.0",
     "dotenv": "^16.0.0",
-   "express-session": "^1.17.3"
+    "express-session": "^1.17.3",
+    "cors": "^2.8.5"
   },
   "engines": {
     "node": ">=14.x"
