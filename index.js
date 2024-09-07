@@ -113,27 +113,43 @@ io.on('connection', (socket) => {
     });
 
     // Handle sending chat messages
-    socket.on('chat message', ({ to, msg }) => {
-        if (!socket.username) return;
+    // Server-side: index.js
+socket.on('chat message', ({ to, msg }) => {
+    if (!socket.username) return;
 
-        const message = { from: socket.username, msg, to };
-        saveMessage(socket.username, to, msg);
+    const timestamp = new Date().toLocaleTimeString(); // Get the time the message was sent
+    const message = { from: socket.username, msg, to, timestamp };
 
-        // Deliver message to the recipient if online
-        if (users[to] && users[to].online) {
-            io.to(users[to].socketId).emit('chat message', message);
-        }
+    saveMessage(socket.username, to, msg);
 
-        // Echo message back to the sender
-        socket.emit('chat message', message);
-    });
+    // Log message sending
+    console.log(`Sending message from ${socket.username} to ${to}: ${msg}`);
+
+    // Deliver message to the recipient if online
+    if (users[to] && users[to].online) {
+        io.to(users[to].socketId).emit('chat message', message);
+        console.log(`Message delivered to ${to}`);
+    } else {
+        console.log(`${to} is not online`);
+    }
+
+    // Echo message back to the sender
+    socket.emit('chat message', message);
+});
+
 
     // Load messages between two users
     socket.on('load messages', ({ user }) => {
         if (socket.username) {
-            loadPrivateMessageHistory(socket.username, user, (messages) => {
-                socket.emit('chat history', messages);
-            });
+            if (user) {
+                loadPrivateMessageHistory(socket.username, user, (messages) => {
+                    socket.emit('chat history', messages);
+                    console.log(`Loaded message history between ${socket.username} and ${user}`);
+                });
+            } else {
+                socket.emit('chat history', []);
+                console.log('No user selected for messages');
+            }
         }
     });
 
@@ -150,7 +166,7 @@ io.on('connection', (socket) => {
                         if (users[socket.username]) {
                             users[socket.username].online = false;
                         }
-                        updateUsersList();
+                        updateUsersList(); // Update users list excluding the disconnected user
                     }
                 }
             );
@@ -161,13 +177,9 @@ io.on('connection', (socket) => {
     // Handle new password setup for users without a password
     socket.on('setup password', async ({ username, password }) => {
         try {
-            // Hash the new password
             const hashedPassword = await bcrypt.hash(password, 10);
-            // Update the user's password in the database
             await pool.query('UPDATE users SET password = $1 WHERE username = $2', [hashedPassword, username]);
             socket.emit('password setup successful');
-            
-            // Now login the user
             await loginUser(socket, username);
         } catch (err) {
             console.error('Error setting up password:', err);
@@ -181,10 +193,12 @@ async function loginUser(socket, username) {
     await pool.query('UPDATE users SET online = TRUE WHERE username = $1', [username]);
     users[username] = { socketId: socket.id, online: true };
     socket.username = username;
-    socket.request.session.username = username;
-    socket.request.session.save();
+    if (socket.request.session) {
+        socket.request.session.username = username;
+        socket.request.session.save();
+    }
     socket.emit('login success', username);
-    updateUsersList();
+    updateUsersList(); // Exclude the current user from the list sent to others
     loadPrivateMessageHistory(username, null, (messages) => {
         socket.emit('chat history', messages);
     });
@@ -207,7 +221,6 @@ function saveMessage(sender, receiver, message) {
 function loadPrivateMessageHistory(user1, user2, callback) {
     let query, params;
     if (user2) {
-        // Load conversation between user1 and user2
         query = `
             SELECT sender, receiver, message, timestamp
             FROM messages
@@ -216,14 +229,8 @@ function loadPrivateMessageHistory(user1, user2, callback) {
         `;
         params = [user1, user2];
     } else {
-        // Load all messages involving user1
-        query = `
-            SELECT sender, receiver, message, timestamp
-            FROM messages
-            WHERE sender = $1 OR receiver = $1
-            ORDER BY timestamp ASC
-        `;
-        params = [user1];
+        callback([]);
+        return;
     }
 
     pool.query(query, params, (err, result) => {
@@ -252,12 +259,15 @@ function updateUsersList() {
                 return;
             }
 
+            // Create a map of users to send to clients
             const userList = result.rows.map(row => ({
                 username: row.username,
                 online: row.online,
             }));
 
-            io.emit('users', userList);  // Broadcast users list to all clients
+            // Emit updated user list to all connected clients
+            io.emit('users', userList);
+            console.log('Users list updated:', userList);
         }
     );
 }
