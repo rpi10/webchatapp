@@ -71,6 +71,7 @@ pool.query(`
 // Track users and their socket connections
 const users = {};  // {username: {socketId: socketId, online: boolean}}
 
+// Handle socket connection
 io.on('connection', (socket) => {
     console.log('A user connected');
 
@@ -113,30 +114,21 @@ io.on('connection', (socket) => {
     });
 
     // Handle sending chat messages
-    // Server-side: index.js
-socket.on('chat message', ({ to, msg }) => {
-    if (!socket.username) return;
+    socket.on('chat message', ({ to, msg }) => {
+        if (!socket.username) return;
 
-    const timestamp = new Date().toLocaleTimeString(); // Get the time the message was sent
-    const message = { from: socket.username, msg, to, timestamp };
+        const timestamp = new Date().toLocaleTimeString();
+        const message = { from: socket.username, msg, to, timestamp };
 
-    saveMessage(socket.username, to, msg);
+        saveMessage(socket.username, to, msg);
 
-    // Log message sending
-    console.log(`Sending message from ${socket.username} to ${to}: ${msg}`);
-
-    // Deliver message to the recipient if online
-    if (users[to] && users[to].online) {
-        io.to(users[to].socketId).emit('chat message', message);
-        console.log(`Message delivered to ${to}`);
-    } else {
-        console.log(`${to} is not online`);
-    }
-
-    // Echo message back to the sender
-    socket.emit('chat message', message);
-});
-
+        // Emit message to the recipient and the sender
+        if (users[to] && users[to].online) {
+            io.to(users[to].socketId).emit('chat message', message);
+            io.to(users[to].socketId).emit('notification', `New message from ${socket.username}`);
+        }
+        socket.emit('chat message', message);
+    });
 
     // Load messages between two users
     socket.on('load messages', ({ user }) => {
@@ -144,11 +136,9 @@ socket.on('chat message', ({ to, msg }) => {
             if (user) {
                 loadPrivateMessageHistory(socket.username, user, (messages) => {
                     socket.emit('chat history', messages);
-                    console.log(`Loaded message history between ${socket.username} and ${user}`);
                 });
             } else {
                 socket.emit('chat history', []);
-                console.log('No user selected for messages');
             }
         }
     });
